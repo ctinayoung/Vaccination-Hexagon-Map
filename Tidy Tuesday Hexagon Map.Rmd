@@ -1,0 +1,56 @@
+---
+title: "Vaccination Rates by State"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(janitor)
+library(geojsonio)
+library(rgdal)
+library(broom)
+library(rgeos)
+```
+
+```{r}
+# Load state vaccination rates from https://www.mayoclinic.org/coronavirus-covid-19/vaccine-tracker
+
+vaccination_rates <- read.csv("data\\Vaccination Rates by State.csv") %>% 
+  clean_names() %>% 
+  mutate(fully_vaccinated = as.numeric(sub("%", "", fully_vaccinated)) / 100,
+         location = ifelse(location == "Washington, D.C.", "District of Columbia", location))
+```
+
+```{r}
+# Load hexagon map from https://team.carto.com/u/andrew/tables/andrew.us_states_hexgrid/public/map
+
+spdf <- geojson_read("data/us_states_hexgrid.geojson",  what = "sp")
+
+spdf@data = spdf@data %>%
+  mutate(google_name = gsub(" \\(United States\\)", "", google_name))
+```
+
+```{r}
+spdf@data = spdf@data %>% mutate(google_name = gsub(" \\(United States\\)", "", google_name))
+spdf_fortified <- tidy(spdf, region = "google_name")
+
+# Calculate the centroid of each hexagon to add the label:
+
+centers <- cbind.data.frame(data.frame(gCentroid(spdf, byid=TRUE), id=spdf@data$iso3166_2))
+```
+
+```{r}
+spdf_fortified <- spdf_fortified %>%
+  left_join(. , vaccination_rates, by=c("id"="location")) 
+
+plot <- ggplot() +
+  geom_polygon(data = spdf_fortified, aes(fill =  fully_vaccinated, x = long, y = lat, group = group)) +
+  geom_text(data=centers, aes(x=x, y=y, label=id)) +
+  scale_fill_gradient(trans = "log", low="#e63900", high="#003cb3") +
+  theme_void() +
+  coord_map() + 
+  guides(fill=guide_legend(title="Fully-Vaccinated\nRate")) +
+  ggtitle("Fully-Vaccinated Rates by State") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
